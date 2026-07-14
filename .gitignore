@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.streamlit/config.toml
+venv/
+.venv/
+env/
+.env
