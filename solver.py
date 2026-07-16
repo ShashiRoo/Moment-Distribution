@@ -84,16 +84,12 @@ class BeamSolver:
         DF_right = [0.0] * (N + 1)
 
         # Boundary Joint 0
-        if support_conditions[0] == 'Fixed':
-            DF_right[0] = 0.0
-        else:  # Pinned / Hinged / Continuous
-            DF_right[0] = 1.0
+        # Under the modified stiffness method, since a pinned boundary is released initially
+        # and doesn't receive carry-over, its distribution factor is set to 0.0.
+        DF_right[0] = 0.0
 
         # Boundary Joint N
-        if support_conditions[N] == 'Fixed':
-            DF_left[N] = 0.0
-        else:  # Pinned / Hinged / Continuous
-            DF_left[N] = 1.0
+        DF_left[N] = 0.0
 
         # Interior Joints 1 to N-1
         for j in range(1, N):
@@ -105,10 +101,18 @@ class BeamSolver:
             else:
                 # Pinned or Continuous intermediate support
                 # Member stiffnesses meeting at joint j:
-                # Left: span j-1, stiffness is 4 * K[j-1]
-                # Right: span j, stiffness is 4 * K[j]
-                k_l = 4.0 * K[j-1]
-                k_r = 4.0 * K[j]
+                # Left: span j-1, stiffness multiplier is 3.0 if span j-1 is span 0 and support 0 is Pinned
+                # Right: span j, stiffness multiplier is 3.0 if span j is span N-1 and support N is Pinned
+                if j - 1 == 0 and support_conditions[0] == 'Pinned':
+                    k_l = 3.0 * K[j-1]
+                else:
+                    k_l = 4.0 * K[j-1]
+
+                if j == N - 1 and support_conditions[N] == 'Pinned':
+                    k_r = 3.0 * K[j]
+                else:
+                    k_r = 4.0 * K[j]
+
                 DF_left[j] = k_l / (k_l + k_r)
                 DF_right[j] = k_r / (k_l + k_r)
 
@@ -130,6 +134,40 @@ class BeamSolver:
             'M_L_inc': list(M_L),
             'M_R_inc': list(M_R)
         })
+
+        # Apply initial release of pinned outer supports if any
+        released = False
+        release_L = [0.0] * N
+        release_R = [0.0] * N
+
+        if support_conditions[0] == 'Pinned':
+            change_L = -M_L[0]
+            # Carry over to the right end of span 0 only if the right end of span 0 is not pinned
+            change_R = 0.5 * change_L if (N > 1 or support_conditions[1] != 'Pinned') else 0.0
+            M_L[0] = 0.0
+            M_R[0] += change_R
+            release_L[0] = change_L
+            release_R[0] = change_R
+            released = True
+
+        if support_conditions[N] == 'Pinned':
+            change_R = -M_R[N-1]
+            # Carry over to the left end of span N-1 only if the left end of span N-1 is not pinned
+            change_L = 0.5 * change_R if (N > 1 or support_conditions[0] != 'Pinned') else 0.0
+            M_R[N-1] = 0.0
+            M_L[N-1] += change_L
+            release_L[N-1] = change_L
+            release_R[N-1] = change_R
+            released = True
+
+        if released:
+            steps_log.append({
+                'Step': 'Release Pinned Ends',
+                'M_L': list(M_L),
+                'M_R': list(M_R),
+                'M_L_inc': release_L,
+                'M_R_inc': release_R
+            })
 
         converged = False
         for iter_idx in range(1, max_iter + 1):
@@ -184,8 +222,17 @@ class BeamSolver:
             co_L = [0.0] * N
             co_R = [0.0] * N
             for i in range(N):
-                co_L[i] = 0.5 * dm_left[i+1]
-                co_R[i] = 0.5 * dm_right[i]
+                # Carry over to left end of span i (joint i)
+                if i == 0 and support_conditions[0] == 'Pinned':
+                    co_L[i] = 0.0
+                else:
+                    co_L[i] = 0.5 * dm_left[i+1]
+
+                # Carry over to right end of span i (joint i+1)
+                if i == N - 1 and support_conditions[N] == 'Pinned':
+                    co_R[i] = 0.0
+                else:
+                    co_R[i] = 0.5 * dm_right[i]
 
             # Apply carry over
             for i in range(N):

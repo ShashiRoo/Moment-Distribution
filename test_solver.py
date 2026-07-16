@@ -84,5 +84,42 @@ class TestBeamSolver(unittest.TestCase):
         self.assertAlmostEqual(result['support_reactions'][0], 48.0, places=3)
         self.assertAlmostEqual(result['support_reactions'][1], 48.0, places=3)
 
+    def test_modified_stiffness_method_details(self):
+        """
+        Verify specific distribution factors and step logs under the Modified Stiffness Method.
+        2-span symmetric beam: supports Pinned, Continuous, Pinned.
+        With both outer supports pinned:
+          - DFs at outer supports should be 0.0 (since they are released initially).
+          - DFs at center support should be 0.5 and 0.5 (using 3EI/L for both spans).
+          - 'Release Pinned Ends' step should be logged.
+          - Iterations should converge immediately (0 cycles / steps log length of 2).
+        """
+        spans = [
+            {
+                'L': 6.0,
+                'EI': 10000.0,
+                'loads': [{'type': 'UDL', 'w': 10.0, 'a': 0.0, 'b': 6.0}]
+            },
+            {
+                'L': 6.0,
+                'EI': 10000.0,
+                'loads': [{'type': 'UDL', 'w': 10.0, 'a': 0.0, 'b': 6.0}]
+            }
+        ]
+        supports = ['Pinned', 'Continuous', 'Pinned']
+
+        result = BeamSolver.solve(spans, supports)
+
+        # Assert DFs
+        self.assertEqual(result['DF_right'][0], 0.0)
+        self.assertEqual(result['DF_left'][2], 0.0)
+        self.assertAlmostEqual(result['DF_left'][1], 0.5, places=5)
+        self.assertAlmostEqual(result['DF_right'][1], 0.5, places=5)
+
+        # Assert steps log
+        step_names = [step['Step'] for step in result['steps_log']]
+        self.assertIn('Release Pinned Ends', step_names)
+        self.assertEqual(step_names, ['Initial FEM', 'Release Pinned Ends'])
+
 if __name__ == '__main__':
     unittest.main()
